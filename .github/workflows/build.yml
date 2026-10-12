@@ -1,0 +1,77 @@
+name: Build ARM64 (slimt + PaddleOCR)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build slimt in ARM64 container
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            ubuntu:22.04 \
+            /bin/bash -c "
+              set -e
+              apt-get update && apt-get install -y \
+                build-essential cmake git wget \
+                libboost-all-dev libprotobuf-dev protobuf-compiler \
+                libssl-dev python3
+              
+              # Сборка slimt
+              git clone --recursive https://github.com/jerinphilip/slimt.git
+              cd slimt
+              mkdir build && cd build
+              cmake .. -DCMAKE_BUILD_TYPE=Release
+              make -j$(nproc)
+              # Копируем бинарник в общую папку
+              cp bin/slimt /workspace/slimt-arm64
+            "
+
+      - name: Build PaddleOCR/MNN in ARM64 container
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            ubuntu:22.04 \
+            /bin/bash -c "
+              set -e
+              apt-get update && apt-get install -y \
+                build-essential cmake git wget \
+                libopencv-dev libprotobuf-dev protobuf-compiler
+              
+              # Клонируем rust-paddle-ocr
+              git clone https://github.com/zibo-chen/rust-paddle-ocr.git
+              cd rust-paddle-ocr
+              
+              # Устанавливаем Rust
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              source $HOME/.cargo/env
+              
+              # Собираем проект. Флаг build-mnn-from-source заставит собрать MNN из исходников
+              cargo build --release --features build-mnn-from-source
+              
+              # Копируем результат
+              cp target/release/ocr-rs /workspace/ocr-rs-arm64
+            "
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-binaries
+          path: |
+            slimt-arm64
+            ocr-rs-arm64
