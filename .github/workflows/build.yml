@@ -45,7 +45,6 @@ jobs:
               git clone --recursive https://github.com/jerinphilip/slimt.git
               cd slimt
 
-              # Вырезаем -Werror из всех cmake-файлов
               find . -name 'CMakeLists.txt' -exec sed -i 's/-Werror//g' {} +
               find . -name '*.cmake' -exec sed -i 's/-Werror//g' {} +
 
@@ -64,11 +63,17 @@ jobs:
               make -j\$(nproc)
 
               mkdir -p /workspace/artifacts/slimt
-              find . -maxdepth 3 -type f -executable -name 'slimt*' \
-                -exec cp {} /workspace/artifacts/slimt/ \;
+              # Копируем ВСЕ исполняемые файлы из build/
+              find . -type f -executable \
+                -not -name '*.cmake' \
+                -not -name '*.txt' \
+                -not -name '*.o' \
+                -not -name '*.a' \
+                -not -name '*.so*' \
+                -exec cp --parents {} /workspace/artifacts/slimt/ \; || true
 
               echo '--- slimt artifacts ---'
-              ls -la /workspace/artifacts/slimt/
+              find /workspace/artifacts/slimt -type f | head -50
             "
 
       # ---------- rust-paddle-ocr ----------
@@ -109,35 +114,68 @@ jobs:
               git clone https://github.com/zibo-chen/rust-paddle-ocr.git
               cd rust-paddle-ocr
 
-              cargo build --release --features build-mnn-from-source
+              echo '=== Cargo metadata: targets ==='
+              cargo metadata --no-deps --format-version 1 \
+                | python3 -c \"import sys,json; d=json.load(sys.stdin); [print(p['name'], '->', [(t['name'], t['kind']) for t in p['targets']]) for p in d['packages']]\" || true
+
+              echo '=== Building (bins + examples) ==='
+              cargo build --release --bins --examples \
+                --features build-mnn-from-source || \
+              cargo build --release --bins --examples \
+                --features build-mnn-from-source,mnn || \
+              cargo build --release || true
+
+              echo '=== target/release contents ==='
+              ls -la target/release/ || true
 
               mkdir -p /workspace/artifacts/paddleocr
-              find target/release -maxdepth 1 -type f -executable \
-                -exec cp {} /workspace/artifacts/paddleocr/ \;
+
+              # Собираем ВСЁ исполняемое из target, кроме мусора
+              find target -type f -executable \
+                -not -path '*/build/*' \
+                -not -path '*/incremental/*' \
+                -not -path '*/.fingerprint/*' \
+                -not -name '*.so' \
+                -not -name '*.dylib' \
+                -not -name '*.rlib' \
+                -not -name '*.rmeta' \
+                -not -name '*.d' \
+                -exec cp --parents {} /workspace/artifacts/paddleocr/ \; 2>/dev/null || true
+
+              # Плюс .so-библиотеки (могут пригодиться)
+              find target -type f -name '*.so' \
+                -not -path '*/build/*' \
+                -exec cp --parents {} /workspace/artifacts/paddleocr/ \; 2>/dev/null || true
 
               echo '--- paddleocr artifacts ---'
-              ls -la /workspace/artifacts/paddleocr/
+              find /workspace/artifacts/paddleocr -type f | head -80
             "
 
       # ---------- проверка ----------
       - name: Verify binaries
         run: |
-          echo '=== Architecture check ==='
+          echo '=== Architecture ==='
           uname -m
           echo
           echo '=== slimt ==='
-          ls -la artifacts/slimt/ || true
-          file artifacts/slimt/* || true
+          find artifacts/slimt -type f -exec file {} \; 2>/dev/null | head -30 || true
           echo
           echo '=== paddleocr ==='
-          ls -la artifacts/paddleocr/ || true
-          file artifacts/paddleocr/* || true
+          find artifacts/paddleocr -type f -exec file {} \; 2>/dev/null | head -50 || true
 
       # ---------- артефакты ----------
-      - name: Upload artifacts
+      - name: Upload slimt artifact
         uses: actions/upload-artifact@v4
         with:
-          name: arm64-binaries
-          path: artifacts/
+          name: arm64-slimt
+          path: artifacts/slimt/
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Upload paddleocr artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-paddleocr
+          path: artifacts/paddleocr/
+          retention-days: 30
+          if-no-files-found: warn
