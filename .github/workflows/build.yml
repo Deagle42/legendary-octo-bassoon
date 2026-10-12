@@ -51,9 +51,7 @@ jobs:
                 -DWITH_RUY=ON \
                 -DUSE_NEON=ON \
                 -DUSE_BUILTIN_SENTENCEPIECE=ON \
-                -DBLA_VENDOR=OpenBLAS \
-                -DSLIMT_PACKAGE=ON \
-                -DXSIMD_DEFAULT_ARCH=xsimd::neon64
+                -DBLA_VENDOR=OpenBLAS
 
               make -j\$(nproc)
 
@@ -96,7 +94,6 @@ jobs:
                 python3 python3-pip \
                 libssl-dev
 
-              # Установка Rust
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
                 | sh -s -- -y --default-toolchain stable --profile minimal
               source \$HOME/.cargo/env
@@ -104,7 +101,6 @@ jobs:
               git clone https://github.com/zibo-chen/rust-paddle-ocr.git
               cd rust-paddle-ocr
 
-              # Сборка MNN из исходников + OCR
               cargo build --release --features build-mnn-from-source
 
               mkdir -p /workspace/artifacts/paddleocr
