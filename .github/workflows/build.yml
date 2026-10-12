@@ -44,6 +44,11 @@ jobs:
 
               git clone --recursive https://github.com/jerinphilip/slimt.git
               cd slimt
+
+              # Вырезаем -Werror из всех cmake-файлов
+              find . -name 'CMakeLists.txt' -exec sed -i 's/-Werror//g' {} +
+              find . -name '*.cmake' -exec sed -i 's/-Werror//g' {} +
+
               mkdir -p build && cd build
 
               cmake .. \
@@ -53,7 +58,8 @@ jobs:
                 -DWITH_INTGEMM=OFF \
                 -DUSE_NEON=ON \
                 -DUSE_BUILTIN_SENTENCEPIECE=ON \
-                -DBLA_VENDOR=OpenBLAS
+                -DBLA_VENDOR=OpenBLAS \
+                -DCMAKE_CXX_FLAGS='-Wno-error -Wno-comment'
 
               make -j\$(nproc)
 
