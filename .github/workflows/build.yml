@@ -8,76 +8,103 @@ on:
 jobs:
   build-arm64:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build slimt in ARM64 container
-        run: |
-          docker run --rm --platform linux/arm64 \
-          -v ${{ github.workspace }}:/workspace \
-          -w /workspace \
-            ubuntu:22.04 \
-          /bin/bash -c "
-          set -e
-          apt-get update && apt-get install -y \
-          build-essential cmake git wget \
-          libboost-all-dev libprotobuf-dev protobuf-compiler \
-          libssl-dev python3 \
-          libopenblas-dev libxsimd-dev libsentencepiece-dev libpcre2-dev \
-          pkg-config
-          git clone --recursive https://github.com/jerinphilip/slimt.git
-          cd slimt
-          mkdir build && cd build
-        
-          cmake .. -DCMAKE_BUILD_TYPE=Release \
-          -DWITH_GEMMOLOGY=ON \
-          -DUSE_NEON=ON \
-          -DUSE_BUILTIN_SENTENCEPIECE=OFF \
-          -DBLA_VENDOR=OpenBLAS \
-          -DSLIMT_PACKAGE=ON
-        
-          make -j$(nproc)
-          cp bin/slimt /workspace/slimt-arm64
-          cp bin/slimt-cli /workspace/slimt-cli-arm64
-          "
-      - name: Build PaddleOCR/MNN in ARM64 container
+      - name: Build slimt (ARM64)
         run: |
           docker run --rm --platform linux/arm64 \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             ubuntu:22.04 \
             /bin/bash -c "
-              set -e
+              set -euo pipefail
+
+              export DEBIAN_FRONTEND=noninteractive
               apt-get update && apt-get install -y \
-                build-essential cmake git wget \
-                libopencv-dev libprotobuf-dev protobuf-compiler
-              
-              # Клонируем rust-paddle-ocr
+                build-essential cmake git wget pkg-config \
+                libboost-all-dev libprotobuf-dev protobuf-compiler \
+                libssl-dev python3 \
+                libopenblas-dev libsentencepiece-dev libpcre2-dev
+
+              git clone --recursive https://github.com/jerinphilip/slimt.git
+              cd slimt
+              mkdir -p build && cd build
+
+              cmake .. \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DWITH_RUY=ON \
+                -DUSE_NEON=ON \
+                -DUSE_BUILTIN_SENTENCEPIECE=ON \
+                -DBLA_VENDOR=OpenBLAS \
+                -DSLIMT_PACKAGE=ON
+
+              make -j\$(nproc)
+
+              # Копируем все собранные бинарники
+              mkdir -p /workspace/artifacts/slimt
+              find . -maxdepth 3 -type f -executable -name 'slimt*' \
+                -exec cp {} /workspace/artifacts/slimt/ \;
+
+              ls -la /workspace/artifacts/slimt/
+            "
+
+      - name: Build PaddleOCR (ARM64)
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            ubuntu:22.04 \
+            /bin/bash -c "
+              set -euo pipefail
+
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update && apt-get install -y \
+                build-essential cmake git wget pkg-config \
+                libopencv-dev libprotobuf-dev protobuf-compiler \
+                libssl-dev curl ca-certificates
+
+              # Устанавливаем Rust
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+                | sh -s -- -y --default-toolchain stable
+              source \$HOME/.cargo/env
+
               git clone https://github.com/zibo-chen/rust-paddle-ocr.git
               cd rust-paddle-ocr
-              
-              # Устанавливаем Rust
-              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-              source $HOME/.cargo/env
-              
-              # Собираем проект. Флаг build-mnn-from-source заставит собрать MNN из исходников
+
+              # Сборка MNN из исходников и OCR-бинаря
               cargo build --release --features build-mnn-from-source
-              
-              # Копируем результат
-              cp target/release/ocr-rs /workspace/ocr-rs-arm64
+
+              mkdir -p /workspace/artifacts/paddleocr
+              cp target/release/ocr-rs /workspace/artifacts/paddleocr/ || \
+                find target/release -maxdepth 1 -type f -executable \
+                  -exec cp {} /workspace/artifacts/paddleocr/ \;
+
+              ls -la /workspace/artifacts/paddleocr/
             "
+
+      - name: Verify binaries
+        run: |
+          echo '=== slimt ==='
+          file artifacts/slimt/* || true
+          echo '=== paddleocr ==='
+          file artifacts/paddleocr/* || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: arm64-binaries
-          path: |
-            slimt-arm64
-            ocr-rs-arm64
+          path: artifacts/
+          retention-days: 30
+          if-no-files-found: error
