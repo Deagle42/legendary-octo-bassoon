@@ -30,8 +30,8 @@ jobs:
           build-essential cmake git wget \
           libboost-all-dev libprotobuf-dev protobuf-compiler \
           libssl-dev python3 \
-          libopenblas-dev libxsimd-dev libsentencepiece-dev libpcre2-dev
-        
+          libopenblas-dev libxsimd-dev libsentencepiece-dev libpcre2-dev \
+          pkg-config
           git clone --recursive https://github.com/jerinphilip/slimt.git
           cd slimt
           mkdir build && cd build
